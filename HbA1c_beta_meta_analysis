@@ -1,0 +1,207 @@
+## THIS CODE PERFORMS A META_ANALYSIS AND MAKES A FOREST PLOT FOR THREE TRAITS
+## THE CODE THEN COMBINES THOSE THREE PLOTS INTO ONE FIGURE WITH A/B/C PANELS
+# Loading Data
+## have single quotes around (eg NZ Maori) so that both words go into the same column as this is using spaces as the delimiter
+## for the Other Polynesian row you have to specify the NA in the Group column as read.table treats two spaces as one for column delimiting
+#SEQUENOM
+SEQUENOM <- read.table(text = "Study Group Beta Error
+Male 'All Polynesian' 5.365 2.324
+Female 'All Polynesian' 5.168", header = TRUE, stringsAsFactors = FALSE)
+
+#JAZF1_NPH
+JAZF1_NPH <- read.table(text = "Study Group Beta Error
+Male 'All Polynesian' 11.487 6.574
+Female 'All Polynesiann' -14.109 7.842
+Male 'NPH' 3.219 3.455
+Female 'NPH' 6.929 6.621", header = TRUE, stringsAsFactors = FALSE)
+
+#JAZF1_SEQUENOM_NPH
+JAZF1_SEQUENOM_NPH<- read.table(text = "Study Group Beta Error
+Male 'All Polynesian' 6.176 2.186
+Female 'All Polynesian' 2.041 4.018
+Male 'NPH' 3.219 3.455
+Female 'NPH' 6.929 6.621", header = TRUE, stringsAsFactors = FALSE)
+
+# Perform meta analyses
+library(meta)
+SEQUENOM_meta <- metagen(TE = Beta, # treatment effect (beta or log OR)
+                        seTE = Error, # standard error
+                        studlab = Study, # study labels 
+                        byvar = Group, # groupings to do sub-metas on (can't have any as NA so made other a blank text cell) 
+                        data = SEQUENOM # file of input data
+)
+JAZF1_NPH_meta <- metagen(TE = Beta, seTE = Error, studlab = Study, byvar = Group, data = JAZF1_NPH)
+
+JAZF1_SEQUENOM_NPH_meta <- metagen(TE = Beta, seTE = Error, studlab = Study, byvar = Group, data = JAZF1_SEQUENOM_NPH)
+
+# have to round p-values before making plot (no way to round within plot function)
+## to convert all p-values to scientific style (1e-10):
+# log_BMI_meta$pval <- sprintf(fmt = "%.2e", log_BMI_meta$pval)
+## to convert just one p-value to scientific 
+# log_BMI_meta$pval[1] <- sprintf(fmt = "%.2e", log_BMI_meta$pval[1])
+# log_BMI_meta$pval[2:7] <- sprintf(fmt = "%.3f", as.numeric(log_BMI_meta$pval[2:7]))
+## [% means numbers before the decimal don't change, 3f means 3 decimal figures; for scientific format 2e means 2 decimal figures before adding the e]
+#put .2e if <0.1
+SEQUENOM_meta$pval <- sprintf(fmt = "%.2e", # format to convert to 
+                                    SEQUENOM_meta$pval # p-values to convert
+)
+JAZF1_NPH_meta$pval <- sprintf(fmt = "%.2e", JAZF1_NPH_meta$pval)
+JAZF1_SEQUENOM_NPH_meta$pval <- sprintf(fmt = "%.2e", JAZF1_SEQUENOM_NPH_meta$pval)
+
+# Make tidier forest plots & save
+
+# saves first forest plot
+png(filename = "SEQUENOM_meta_HbA1c.png", 
+    width = 8, # how wide to make the .png
+    height = 6, # how tall to make the .png (make 3 or 4 if not including 'byvar' in the meta)
+    units = "in", # above measures are in inches
+    res = 300) # resolution is 300dpi [this makes a large, good resolution image for use on posters, but also best for getting high quality images in journals]
+# make customised forest plot log_BMI
+forest(SEQUENOM_meta, 
+       leftcols = c("studlab", "effect", "ci", "pval"), # specify what columns to plot at left of graph
+       leftlabs = c("Cohort", "Beta", "[95% CI]", "P"), # specify column labels (for above)
+       rightcols = FALSE, # don't plot any columns on right of graph
+       
+       comb.random = FALSE, # don't plot random effect; switch to comb.fixed = FALSE to only plot random effect
+       text.fixed = "Overall Effect", # label for overall effect; switch to text.random if plotting random effect
+       test.overall.fixed = TRUE, # print p value of overall effect; switch to test.overall.random if plotting random effect
+       
+       xlab = "HbA1c", # label for x-axis
+       xlim = c(-15, 15), # x-axis limits
+       
+       print.Q = TRUE, # print heterogeneity Q value
+       print.pval.Q = TRUE, # print heterogeneity Q p value
+       print.tau2 = FALSE, # don't print tau^2 value
+       print.I2 = FALSE, # don't print I^2 value
+       
+       digits = 3, # beta value digits
+       digits.se = 3, # standard error digits
+       digits.pval.Q = 1, # heterogeneity p digits
+       digits.pval = 1, # overall effect p digits
+       scientific.pval = TRUE, # make heterogeneity and overall p-values scientific notation
+       
+       col.square = "red", # colour of cohort effects
+       col.diamond = "cornflowerblue", # colour of overall effect
+       
+       print.byvar = FALSE # removes "Group = " from header of subgroups
+)
+dev.off() # saves plot into .png file
+
+# saves next forest plot
+png(filename = "JAZF1_NPH_meta_HbA1c.png", width = 8, height = 6, units = "in", res = 300)
+# make customised forest plot untrans_BMI
+forest(JAZF1_NPH_meta, 
+       leftcols = c("studlab", "effect", "ci", "pval"), # specify what columns to plot at left of graph
+       leftlabs = c("Cohort", "Beta", "[95% CI]", "P"), # specify column labels (for above)
+       rightcols = FALSE, # don't plot any columns on right of graph
+       
+       comb.random = FALSE, # don't plot random effect
+       text.fixed = "Overall Effect", # label for overall effect
+       test.overall.fixed = TRUE, # print p value of overall effect
+       
+       xlab = "HbA1c", # label for x-axis
+       xlim = c(-15, 15), # x-axis limits
+       
+       print.Q = TRUE, # print heterogeneity Q value
+       print.pval.Q = TRUE, # print heterogeneity Q p value
+       print.tau2 = FALSE, # don't print tau^2 value
+       print.I2 = FALSE, # don't print I^2 value
+       
+       digits = 3, # beta value digits
+       digits.se = 3, # standard error digits
+       digits.pval.Q = 1, # heterogeneity p digits
+       digits.pval = 1, # overall effect p digits
+       scientific.pval = TRUE, # make heterogeneity and overall p-values scientific notation
+       
+       col.square = "red", # colour of cohort effects
+       col.diamond = "cornflowerblue", # colour of overall effect
+       
+       print.byvar = FALSE # removes "Group = " from header of subgroups
+)
+dev.off()
+
+# saves third forest plot
+png(filename = "JAZF1_SEQUENOM_NPH_meta_HbA1c.png", width = 8, height = 6, units = "in", res = 300)
+# make customised forest plot waist_circ
+forest(JAZF1_SEQUENOM_NPH_meta, 
+       leftcols = c("studlab", "effect", "ci", "pval"), # specify what columns to plot at left of graph
+       leftlabs = c("Cohort", "Beta", "[95% CI]", "P"), # specify column labels (for above)
+       rightcols = FALSE, # don't plot any columns on right of graph
+       
+       comb.random = FALSE, # don't plot random effect
+       text.fixed = "Overall Effect", # label for overall effect
+       test.overall.fixed = TRUE, # print p value of overall effect
+       
+       xlab = "HbA1c", # label for x-axis
+       xlim = c(-15, 15), # x-axis limits
+       
+       print.Q = TRUE, # print heterogeneity Q value
+       print.pval.Q = TRUE, # print heterogeneity Q p value
+       print.tau2 = FALSE, # don't print tau^2 value
+       print.I2 = FALSE, # don't print I^2 value
+       
+       digits = 3, # beta value digits
+       digits.se = 3, # standard error digits
+       digits.pval.Q = 1, # heterogeneity p digits
+       digits.pval = 1, # overall effect p digits
+       scientific.pval = TRUE, # make heterogeneity and overall p-values scientific notation
+       
+       col.square = "red", # colour of cohort effects
+       col.diamond = "cornflowerblue", # colour of overall effect
+       
+       print.byvar = FALSE # removes "Group = " from header of subgroups
+)
+dev.off()
+
+# save all three images to the same file; they have to be .png formats for this to work
+library(png)
+# load in plots saved up above
+SEQUENOM_forest <- readPNG("SEQUENOM_meta_HbA1c.png")
+JAZF1_NPH_forest <- readPNG("JAZF1_NPH_meta_HbA1c.png")
+JAZF1_SEQUENOM_NPH_forest <- readPNG("JAZF1_SEQUENOM_NPH_meta_HbA1c.png")
+
+
+png(filename = "SEQUENOM_TOTAL_HbA1c_male_female_split.png",
+    width = 8, # the same width as all three graphs above
+    height = 18, # the height of all three graphs above combined (6 x 3 = 18)
+    units = "in",
+    res = 300)
+par(mar = c(0, 0, 0, 0)) # no margins (plots saved before already have margins)
+# layout says how many plots to put in the file and where to put them, this is 3 plots, one on top of the other
+layout(matrix(data = 1:3, # how many plots you have
+              nrow = 3, # how many rows you want [side-by-side or one on top of other]
+              ncol = 1, # how many columns you want [side-by-side or one on top of other]
+              byrow = TRUE)) # what order to put the plots in (eg if 4 plots in a 2x2 square byrow = TRUE plots 1, 2 on the top line & 3, 4 on the bottom line; byrow = FALSE plots 1, 3 on the top line, 2, 4 on the bottom line)
+
+# add log_BMI_forest to file
+plot(NA, # create an empty plot
+     xlim = c(0, 1), # make the axes go from 0 to 1
+     ylim = c(0, 1), # make the axes go from 0 to 1
+     xaxt = "n", # don't plot the x-axis line
+     yaxt = "n", # don't plot the y-axis line
+     bty = "n", # don't draw a box around the plot
+     xlab = "", # don't label the axes
+     ylab = ""
+)
+rasterImage(image = SEQUENOM_forest, # put the loaded in .png file into the empty graph
+            xleft = 0, # make the .png go from the very start of the x-axis to
+            xright = 1, # the very end of the x-axis
+            ybottom = 0,# make the .png go from the very start of the y-axis to
+            ytop = 1)  # the very end of the y-axis
+points(x = 0.9, # put the figure letter on the right (switch to 0.1 for the left)
+       y = 0.9, # put the figure letter at the top
+       pch = "A", # add the figure letter (for eg Figure2A referencing in paper)
+       cex = 1.5) # the size of the letter
+
+# add untrans_BMI_forest to file
+plot(NA, xlim = c(0, 1), ylim = c(0, 1), xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
+rasterImage(image = JAZF1_NPH_forest, xleft = 0, ybottom = 0, xright = 1, ytop = 1)
+points(x = 0.9, y = 0.9, pch = "B", cex = 1.5)
+
+# add waist_circ_forest to file
+plot(NA, xlim = c(0, 1), ylim = c(0, 1), xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
+rasterImage(image = JAZF1_SEQUENOM_NPH_forest, xleft = 0, ybottom = 0, xright = 1, ytop = 1)
+points(x = 0.9, y = 0.9, pch = "C", cex = 1.5)
+
+# save file
+dev.off()
