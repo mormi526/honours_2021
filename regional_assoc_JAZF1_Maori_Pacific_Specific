@@ -1,0 +1,156 @@
+# JAZF1 association analysis between Maori and Pacific specific/amplified SNPs and T2D, a PLINK analysis
+
+### General
+ssh biocmerriserver1.otago.ac.nz
+cd /(serverlocation)
+module load vcftools/vcftools-0.1.17-dev
+module load bcftools/bcftools-1.10.2
+module load plink/plink1.9b6.21
+
+### Load variant bio VCF
+
+bcftools view -r chr7:27850000-28300000 -m 2 -M 2 -v snps /Volumes/otago_hcs_ro/variant_bio/JG-NZ01-WGS-LP-1.merge.recal.imputed.gq16.vcf.gz |bcftools reheader -h /Volumes/otago_hcs_ro/variant_bio/new_vcf_header.txt |bgzip -c  > /(serverlocation)/JAZF1_long_variant_bio.snps.recal.imputed.gq16.hg38.vcf.gz
+
+
+
+tabix -p vcf JAZF1_long_variant_bio.snps.recal.imputed.gq16.hg38.vcf.gz
+
+
+
+### Calculate allele frequency from lists
+
+vcftools --gzvcf JAZF1__long_variant_bio.snps.recal.imputed.gq16.hg38.vcf.gz --keep All_polynesian1.txt --freq --out JAZF1_long_region_AP_freq
+
+### Get gnomAD data and create file with JAZF1 region
+##### *bcftools view -r <your region> -m 2 -M 2 -v snps -O z -o <output filename.vcf.gz> <original.vcf.gz>*
+
+bcftools view -r chr7:27850000-28300000 -m 2 -M 2 -v snps -O z -o gnomAD.JAZF1_long_region.snps.gq5.v3.vcf.gz gnomad.genomes.r3.0.sites.chr7.vcf.bgz
+
+### Calculate allele freq in gnomAD JAZF1 region file
+bcftools query -f '%ID\t%CHROM\t%POS\t%REF\t%ALT\t%INFO/AC\t%INFO/AF\n' gnomAD.JAZF1_region.snps.gq5.v3.vcf.gz > JAZF1_region_gnomAD_freq
+
+###### ALL POLYNESIAN :
+
+### Merge files to compare allele freq between variant_bio and gnomAD
+
+join -1 2 -2 3 <(sort -k 2 JAZF1_region_AP_freq.frq) <(sort JAZF1_region_gnomAD_freq) > JAZF1_merge_AP_gnomAD.txt
+
+sed 's/:/ /g' JAZF1_merge_AP_gnomAD.txt > JAZF1_merge_AP_gnomAD_nocolon.txt
+### Made sure alleles matched up over variant_bio and gnomAD files  
+
+awk '{if ($7 == $12){print $0} }' JAZF1_merge_AP_gnomAD_nocolon.txt > JAZF1_merge_AP_gnomAD_nocolon_fixed.txt
+
+
+### Sorted files based on: 
+#### *minor AF > 0.01 in polynesians and <0.0001 in gnomad (specific)
+#### minor AF > 0.05 in polynesians and < 0.01 and > 0.0001 in gnomAD (amplified)*
+
+### Specific allele freq comparison
+
+awk '{if ($8 > 0.01 && $14 < 0.0001){print $1, $2, $5, $6, $7, $8, $11, $12, $13, $14} }' JAZF1_merge_AP_gnomAD_nocolon_fixed.txt > JAZF1_specific_AP_variants_fixed.txt
+
+### Amplified allele freq comparison
+
+awk '{if ($8 > 0.05 && $14 > 0.0001 && $14 < 0.01){print $1, $2, $5, $6, $7, $8, $11, $12, $13, $14} }' JAZF1_merge_AP_gnomAD_nocolon_fixed.txt > JAZF1_amplified_AP_variants_fixed1.txt
+
+
+### Number of lines contained in these files:
+
+#### JAZF1_merge_AP_gnomAD.txt : 1021
+#### JAZF1_merge_AP_gnomAD_nocolon_fixed.txt : 524
+#### JAZF1_specific_AP_variants_fixed.txt : 11
+#### JAZF1_amplified_AP_variants_fixed1.txt : 6
+
+
+### Combine amplified and specific files to compare, add headers, add column to specify where data came from (amplified/specific) and create file that contains both
+#### p= Polynesian
+#### g= gnomAD 
+
+cat <(echo "POS CHROM pREF pREF_AF pALT pALT_AF gREF gALT AC gALT_AF" TYPE) <(awk '{print $0, "AMP"}' < JAZF1_amplified_AP_variants_fixed1.txt ) <(awk '{print $0, "SPE"}' <JAZF1_specific_AP_variants_fixed.txt ) > JAZF1_amplified_plus_specific_AP_variants.txt
+
+
+
+# JAZF1 variants + phenotype data
+
+###### ALL POLYNESIAN :
+
+### Create binary PED file (bed)
+#### Make a bed file from amplified and specific all polyensian variants 
+
+tr ' ' '\t' < JAZF1_amplified_plus_specific_AP_variants.txt | awk '{print $2"\t"$1-1"\t"$1 }'| sed '1d' > JAZF1.amplified_plus_specific_AP_variants.bed
+
+
+### Pull out All polynesian IDs and specific regions 
+
+bcftools view -s $(sort All_polynesian1.txt | uniq | tr '\n' ',')  -R JAZF1.amplified_plus_specific_AP_variants.bed --force-samples -O v JAZF1_variant_bio.snps.recal.imputed.gq16.hg38.vcf.gz | bcftools annotate --set-id +'%CHROM\_%POS\_%REF\_%FIRST_ALT' -O z -o variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38.vcf.gz 
+
+
+### Turn into plink format
+
+plink --vcf variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38.vcf.gz --make-bed --out variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38
+
+
+#### Copied fam file for manipulation
+
+cp variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38.fam variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38.fam1
+
+
+### Join phenotype data to fam file to create covariate file
+
+join -1 1 -2 1 <(sort -k 1 variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38.fam1) <(sort ALL_DM_RD_GOUT_PHENO.txt) > variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38.fam2
+
+join -1 1 -2 1 <(sort -k 1 variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38.fam) <(sort FIXED_ALL_DM_RD_GOUT_PHENO.txt) > variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38.FIXED.fam
+
+awk '{print $1, $2, $7, $8, $9, $10}' variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38.FIXED.fam> variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38.REFINED.fam
+
+#### Added a header to this file to indicate the phenotypes
+
+echo  FID IID AGECOL SEX DIABETES BMI > header1.tmp
+cat header1.tmp variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38.REFINED.fam > JAZF1.covariats_file_AP_VB.fam
+
+
+
+## PLINK analysis JAZF1
+
+###### ALL POLYNESIAN: 
+
+### Clean data on RStudio
+
+library(tidyverse)
+
+poly_ids <- read_tsv("/(serverlocation)/All_polynesian1.txt", col_names = "ID") %>% pull(ID) %>% unique()
+
+pheno <- read_tsv("/(serverlocation)/ALL_DM_RD_GOUT_PHENO.txt") %>% filter(PATIENT %in% poly_ids | ALTID %in% poly_ids) %>% 
+  mutate(DIABETEScc = ifelse(DIABETES > 2, NA, DIABETES))
+
+pheno %>% mutate(FID = PATIENT, IID = PATIENT) %>% select(FID, IID, everything()) %>% arrange(IID) %>% View()
+
+dup_ids <- pheno %>% filter(duplicated(PATIENT)) %>% pull(PATIENT)
+
+fix_dups <- pheno %>% mutate(FID = PATIENT, IID = PATIENT) %>% select(FID, IID, everything()) %>% 
+  arrange(IID) %>% filter(IID %in% dup_ids & IID %in% poly_ids)  %>% distinct() %>% drop_na(ETHNICITY) %>% rowid_to_column() %>% 
+  slice(-26,-28, -34, -36, -42, -44, -51,-55,-58,-71,-82, seq(-93, -161, -2) )
+
+non_dups <- pheno %>% mutate(FID = PATIENT, IID = PATIENT) %>% select(FID, IID, everything()) %>% 
+  filter(!IID %in% dup_ids)
+
+dat <- bind_rows(fix_dups, non_dups) %>% filter(PATIENT %in% poly_ids) %>% select(-rowid, -PATIENT, -ALTID)
+
+dat %>%   write_tsv("/(serverlocation)/JAZF1.covariats_file_AP_VB.tsv")
+
+dat %>%  select(FID, IID, DIABETEScc) %>% write_tsv("/(serverlocation)/diabetes_pheno.tsv")
+
+
+
+### Plink to conduct logistic regression
+
+plink --bfile variant_bio.JAZF1.all_polynesian.snps.recal.imputed.gq16.hg38 --update-sex JAZF1.covariats_file_AP_VB.tsv 3 --out JAZF1.results_AP_VB --make-bed
+
+### Plink analyses based on diabetes pheno
+
+plink --bfile JAZF1.results_AP_VB --pheno diabetes_pheno.tsv --pheno-name DIABETEScc --covar JAZF1.covariats_file_AP_VB.tsv -covar-name AGECOL --logistic --freq --hardy --out JAZF1_results_AP_VB
+
+### Order test.assoc.logistic by OD and P values 
+
+sort -k 9 JAZF1_results_AP_VB.assoc.logistic > JAZF1_results_AP_VB.assoc.logistic.P_ordered
+sort -k 7 JAZF1_results_AP_VB.assoc.logistic > JAZF1_results_AP_VB.assoc.logistic.O_ordered
