@@ -1,0 +1,905 @@
+---
+title: "Updated NPH analysis"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+```{r, echo=FALSE, message=F, warning=FALSE, escape = FALSE, results='asis'}
+knitr::opts_chunk$set(echo = TRUE)
+#loading the librarys and functions required 
+library(plyr)
+library("pander")
+library(tidyverse)
+library(xtable)
+library(kableExtra)
+library(knitr) 
+library(dplyr)
+library(HardyWeinberg)
+library(broom)
+library(purrr)
+library(bReakingbad)
+meansd= function(characteristic){ 
+  a <-round(mean(as.numeric(characteristic), na.rm=TRUE),2)
+  b <-round(sd(as.numeric(characteristic), na.rm=TRUE),2)
+  return(paste(a,"(", b,")", collapse = ""))
+}
+npercent=function(characteristic, name){
+  #characteristic is df$column and name is variable from that column in quote marks eg npercent(UKbiobank_goutSE_EURO$SEX,"1")
+  a<-table(characteristic)[name]
+  total<-sum(table(characteristic))  
+  percent <- (as.numeric(a)/as.numeric(total[1]))*100 
+  return(paste(as.numeric(a),"(",round(as.numeric(percent),2),")", collapse = ""))
+}
+hwepval=function(snpcol,gt1,gt2,gt3){
+  #snpcol = column with alleles coded as bases. gt1-3 are the genotypes 
+  #example = hwepval(mydata$ABCC5_RS369277426,"CC","CT","TT")
+  t <- HWExact(table(factor(snpcol, levels = c(gt1, gt2, gt3))), verbose = F)
+  p <- t[["pval"]]
+  return(paste(p))
+}
+#function to highlight significant p-values in tables
+format_p <- function(p){
+  ifelse(as.numeric(p)<0.05, cell_spec(p, "html", bold = T), cell_spec(p, "html",  bold = F))
+}
+#creating the function that will use the glm function to fill in the results table
+results= function(test, genotypes,s){
+  matrixoutput = matrix(nrow=1, ncol=7)
+  matrixoutput[1] <- test$df.null+1
+  matrixoutput[2] <- paste0(genotypes, collapse = "/")
+  matrixoutput[3] <- paste0(s,collapse = "/")
+  matrixoutput[4] <- sprintf(fmt = "%.3f", coefficients(test)[2]) #beta
+  matrixoutput[5] <- sprintf(fmt = "%.3f", coef(summary(test))[2,c(2)]) #SE
+  matrixoutput[6] <- sprintf(fmt = "%.3f", exp(coefficients(test))[2]) #OR
+  matrixoutput[7] <- sprintf(fmt = "%.3f", exp(confint(test))[2,c(1)]) #LCI
+  matrixoutput[8] <- sprintf(fmt = "%.3f", exp(confint(test))[2,c(2)]) #UCI
+  matrixoutput[9] <- sprintf(fmt = "%.3f", coef(summary(test))[2,c(4)]) #p value
+  return ((matrixoutput))
+}
+
+#loading in your phenotype file
+#rename to what you have called your file
+
+sequenom_pheno <- read.delim("NPH_PHENO_CLEANED.txt", stringsAsFactors = F)
+
+
+#loading in your genotype file
+#rename to what you have called your file
+
+Wells <- read.delim("NEW_JAZF1_NPH.txt", stringsAsFactors = F)
+
+#if you genotype file has a different name for the persoanl identifier column rename it PATIENT so it matches your phenotype file
+
+names(Wells)[1] <- "PATIENT"
+
+#now merge together your phenotype file with your genotype file
+
+sequenom_pheno <- merge(sequenom_pheno, Wells, by = "PATIENT", all.x = T)
+
+#Removing blank, making them 'NA' some of these lines might not neccessarily relate to your files, but doing them doesn't hurt :)
+
+sequenom_pheno[sequenom_pheno==""] = NA
+sequenom_pheno[sequenom_pheno==" "] = NA
+sequenom_pheno[sequenom_pheno=="NANA"] = NA
+sequenom_pheno[sequenom_pheno=="00"] = NA
+sequenom_pheno[sequenom_pheno=="NA"] = NA
+#here you are downcoding the codes of diabetes. currently 2 = has diabetes, 1 = does not have diabetes. we want to change these to 0 and 1s. 3 means prediabetic and we want to exclude these people as they are to hard basket
+
+sequenom_pheno$DIABETES<-sub(1,0,sequenom_pheno$DIABETES)
+sequenom_pheno$DIABETES<-sub(2,1, sequenom_pheno$DIABETES)
+sequenom_pheno$DIABETES[sequenom_pheno$DIABETES=="3"] = NA
+
+#doing the same here with the gout column 
+#GOUTAFFSTAT is a GP telling a patient they have gout
+
+sequenom_pheno$GOUTAFFSTAT<-sub(1,0,sequenom_pheno$GOUTAFFSTAT)
+sequenom_pheno$GOUTAFFSTAT<-sub(2,1, sequenom_pheno$GOUTAFFSTAT)
+sequenom_pheno$GOUTAFFSTAT[sequenom_pheno$GOUTAFFSTAT=="3"] = NA
+
+#got to load in the PCA file, which is data from SNPs genome wide from the core exome
+
+# PCAs <- read.delim("CoreExomePCAdata.txt", stringsAsFactors = F)
+# names(PCAs)[1] <- "PATIENT"
+# 
+# sequenom_pheno <- merge(sequenom_pheno, PCAs, by = "PATIENT", all.x = T)
+# 
+# sequenom_pheno$PCAETHBROAD_down <- sequenom_pheno$PCAETHBROAD
+# sequenom_pheno$PCAETHBROAD_down <- mapvalues(sequenom_pheno$PCAETHBROAD_down, c("European", "African", "East or Southeast Asian", "East Polynesian", "West Polynesian", "Polynesian", "South Asian", "Hispanic", "Unspecified"), c("1","2","3","4","5","6","7","8","9"))
+# sequenom_pheno$PCAETHBROAD_down <- as.numeric(as.character(sequenom_pheno$PCAETHBROAD_down))
+
+##Subset the poly data into east and west 
+
+
+sequenom_pheno$RS_150587514_down<-sequenom_pheno$RS150587514
+sequenom_pheno$RS_150587514_down<-mapvalues(sequenom_pheno$RS_150587514_down, c("TT", "TC", "CC" ), c("0", "1", "2"))
+sequenom_pheno$RS_150587514_down<-as.numeric(as.character(sequenom_pheno$RS_150587514_down))
+
+sequenom_pheno$RS150587514 <- as.factor(sequenom_pheno$RS150587514)
+
+
+
+#SUBSET ON ETHNICITY BASED ON WHAT THE PARTICIPANTS SAY IS THEIR ETHNICITY
+
+eastpoly <- subset(sequenom_pheno, ETHCLASS==1) 
+westpoly <- subset(sequenom_pheno, ETHCLASS==2)
+allpoly <- subset(sequenom_pheno, ETHCLASS==1|ETHCLASS==2|ETHCLASS==9)
+
+#SUBSET ON ETHNICITY BASED ON WHAT PCAS SAY THEIR ETHNICITY IS
+
+# eastpoly <- subset(sequenom_pheno, PCAETHBROAD_down==4)
+# westpoly <- subset(sequenom_pheno,PCAETHBROAD_down==5)
+# allpoly <- subset(sequenom_pheno, PCAETHBROAD_down==6|PCAETHBROAD_down==4|PCAETHBROAD_down==5)
+
+eastpoly_males <- subset(eastpoly, SEX==1) 
+westpoly_males <- subset(westpoly,SEX==1)
+allpoly_males <- subset(allpoly, SEX==1)
+
+eastpoly_females <- subset(eastpoly, SEX==2) 
+westpoly_females <- subset(westpoly,SEX==2)
+allpoly_females <- subset(allpoly, SEX==2)
+ 
+#function to calcualte the allele frequencies and HWE of the total dataset
+clin_tab_T  <- function(datasetx) {
+     tab <- datasetx %>%
+     select(PATIENT, RS150587514, RS_150587514_down) %>%
+     dplyr::summarise(CC = npercent(RS150587514, "CC"),
+                      TC = npercent(RS150587514, "TC"),
+                      TT = npercent(RS150587514, "TT"),
+                      MAF1 = sprintf(fmt = "%.4f", (sum(RS_150587514_down,na.rm = T) / (table(is.na(RS_150587514_down))[1]*2))),
+                      HWE1 = sprintf(fmt ="%.4f", as.numeric(hwepval(RS150587514,"CC", "TC", "TT")))) %>% t() %>% data.frame()
+  return(as.data.frame(tab))
+}
+
+#creating the table
+cuz<-c("CC", "TC", "TT", "RS_150587514 (MAF)", "RS_150587514 (HWE)")
+#Poly wide frequencies 
+polytable<-as.data.frame(matrix(nrow=5,ncol=1))
+row.names(polytable)<-cuz
+PWfreq<- clin_tab_T(allpoly) #total
+polytable[1:5,1]<-as.character(PWfreq[1:5,1])
+ 
+#Eastpoly frequencies 
+easttable<-as.data.frame(matrix(nrow=5,ncol=1))
+row.names(easttable)<-cuz
+EPfreq<- clin_tab_T(eastpoly) #total
+easttable[1:5,1]<-as.character(EPfreq[1:5,1])
+ 
+#Westpoly frequencies 
+westtable<-as.data.frame(matrix(nrow=5,ncol=1))
+row.names(westtable)<-cuz
+WPfreq<- clin_tab_T(westpoly) #total
+westtable[1:5,1]<-as.character(WPfreq[1:5,1])
+ 
+#ombining NZ wide and NPH frequency tables
+ 
+ 
+all_freq <- cbind.data.frame(polytable, easttable, westtable)
+row.names(all_freq) <- c("CC", "TC", "TT", "MAF", "HWE")
+all_freq_names <- c( "All Polynesian", "Eastern Polynesian", "Western Polynesian")
+colnames(all_freq) <- all_freq_names
+#making kable table
+kable(all_freq, "html", caption="Genotype frequencies, minor allele frequencies and Hardy Weinberg", escape = F) %>%
+  kable_styling("striped", full_width = FALSE) %>%
+footnote(general = "Minor allele frequency (MAF), Hardy Weinberg Equilibrium (HWE)") %>%
+  column_spec(1, border_right = T)
+
+
+
+
+#DEMOGRAPHIC TABLE 
+clinical_table <- function(datasetx) {
+  tab <- datasetx %>% 
+    select(PATIENT, SEX, AGECOL, HEIGHT, WEIGHT, BMI, GOUTAFFSTAT, DIABETES) %>% 
+    dplyr::summarise(n = NROW(PATIENT),
+                     Gout = npercent(GOUTAFFSTAT, "1"),
+                     Diabetes = npercent(DIABETES,"1"),
+                     BMI = meansd(BMI),
+                     sex = npercent(SEX, "1"),
+                    age = paste0(range(AGECOL, na.rm = T), collapse = " - "),
+                     height = meansd(HEIGHT),
+                     weight = meansd(WEIGHT)) %>% data.frame()
+  return(as.data.frame(tab))
+}
+allpolycohort<-clinical_table(allpoly)
+eastpolycohort<-clinical_table(eastpoly)
+westpolycohort<-clinical_table(westpoly)
+
+#creating the combined demo table 
+demotable<-rbind(allpolycohort, eastpolycohort, westpolycohort)
+row.names(demotable) <- c("Polynesian Cohort", "Eastern Polynesian Cohort", "Western Polynesian Cohort")
+demotable_names <- c("Participants (n)","Gout, n (%)", "Diabetes, n (%)", "BMI, mean (sd)", "Sex (male), n (%)", "Age Range", "Height (cm)", "Weight (kg)")
+colnames(demotable) <- demotable_names
+demotable <- as.data.frame(t(demotable))
+#kable demographic table 
+kable(demotable, "html", caption = "Demographic data") %>% 
+  kable_styling("striped", full_width = FALSE) %>% 
+  footnote(general = "Unless specified data is presented as means (sd)") %>% 
+  column_spec(1, border_right = T)
+
+
+
+snplist <- "RS150587514"
+phenotypelist<-c("HBA1C", "GOUTAFFSTAT", "DIABETES")
+
+```
+
+```{r res tab GENO, echo=FALSE, message=F, warning=FALSE, escape = FALSE, results='asis'}
+
+
+#performing unadjusted and adjusted linear regression and adding results to table
+snp <- "RS150587514"
+
+
+
+make_snp_results_table <- function(dataset, phenotypelist){
+  resultmatrix<-as.data.frame(matrix(nrow=1, ncol=20))
+colnames(resultmatrix)<-c("SNP", "phenotype", "genotypecount", "genotypes", "a1", "n","beta","std.error","statistic","p.value","n.adjusted.1","beta.adjusted.1","std.error.adjusted.1","statistic.adjusted.1","p.value adjusted.1","n.adjusted.2","beta.adjusted.2","std.error.adjusted.2","statistic.adjusted.2","p.value.adjusted.2")
+row <- 1
+  for (pheno in phenotypelist){
+  resultmatrix[row,1] <-"RS150587514"
+  resultmatrix[row,2] <-pheno
+  # genotypes AA/AB/BB as numbers
+  resultmatrix[row,3] <- paste(table(na.omit(dataset[!is.na(dataset[, pheno]), "RS150587514"])), collapse = "/")
+  # genotypes AA/AB/BB as characters
+  resultmatrix[row,4] <- paste(levels(as.factor(dataset[, "RS150587514"])), collapse = "/")
+  
+  dataset$snpcol <- dataset[["RS150587514"]]
+  levels(dataset$snpcol) <- c(2,1,0) # CC =2, TC =1, TT = 0
+  
+  message(paste(table(na.omit(dataset[!is.na(dataset[, pheno]), "snpcol"])), collapse = "/"))
+  # if else function to make sure we run the right type of regression
+  if(pheno %in% c("DIABETES","GOUTAFFSTAT")){
+    # run glm (logistic)
+    test<-glm(as.numeric(dataset[,pheno])~as.numeric(as.character(snpcol)), data = dataset, family = "binomial")
+    test2<-glm(as.numeric(dataset[,pheno])~as.numeric(as.character(snpcol))+as.numeric(AGECOL)+as.factor(SEX), data = dataset, family = "binomial")
+    test3<-glm(as.numeric(dataset[,pheno])~as.numeric(as.character(snpcol))+as.numeric(AGECOL)+as.factor(SEX),data = dataset, family = "binomial")
+    
+  } else{
+    # run lm (linear)
+    test<-lm(as.numeric(dataset[,pheno])~as.numeric(as.character(snpcol)), data = dataset)
+    test2<-lm(as.numeric(dataset[,pheno])~as.numeric(as.character(snpcol))+as.numeric(AGECOL)+as.factor(SEX), data = dataset)
+    test3<-lm(as.numeric(dataset[,pheno])~as.numeric(as.character(snpcol))+as.numeric(AGECOL)+as.factor(SEX), data = dataset)
+    
+  }
+  
+  # save 'test' results
+  resultmatrix[row,6] <-length(test$fitted.values)
+  resultmatrix[row,7:9]<- round(broom::tidy(test)[2,2:4], digits = 3)
+  resultmatrix[row,10]<- broom::tidy(test)[2,5]
+  
+  # save 'test2' results
+  resultmatrix[row,11] <-length(test2$fitted.values)
+  resultmatrix[row,12:14]<- round(broom::tidy(test2)[2,2:4], digits = 3)
+  resultmatrix[row,15]<- broom::tidy(test2)[2,5]
+  
+  # save 'test3' results
+  resultmatrix[row,16] <-length(test3$fitted.values)
+  resultmatrix[row,17:19]<- round(broom::tidy(test3)[2,2:4], digits = 3)
+  resultmatrix[row,20]<- broom::tidy(test3)[2,5]
+  
+  row <-  row + 1
+  rm(test, test2, test3)
+  }
+  
+   
+  # convert log(OR) to actual OR for binomial tests
+resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")] <- round(exp(resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")]), digits = 3)
+
+return(resultmatrix)
+}
+
+make_snp_results_table(allpoly, phenotypelist)
+# for (pheno in phenotypelist){
+#   resultmatrix[row,1] <-snp
+#   resultmatrix[row,2] <-pheno
+#   # genotypes AA/AB/BB as numbers
+#   resultmatrix[row,3] <- paste(table(na.omit(allpoly[!is.na(allpoly[, pheno]), snp])), collapse = "/")
+#   # genotypes AA/AB/BB as characters
+#   resultmatrix[row,4] <- paste(levels(as.factor(allpoly[, snp])), collapse = "/")
+#   
+#   # if else function to make sure we run the right type of regression
+#   if(pheno %in% c("DIABETES","GOUTAFFSTAT")){
+#     # run glm (logistic)
+#     test<-glm(as.numeric(allpoly[,pheno])~as.numeric(as.factor(allpoly[,snp])), data = allpoly, family = "binomial")
+#     test2<-glm(as.numeric(allpoly[,pheno])~as.numeric(as.factor(allpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX), data = allpoly, family = "binomial")
+#     test3<-glm(as.numeric(allpoly[,pheno])~as.numeric(as.factor(allpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX), data = allpoly, family = "binomial")
+#     
+#   } else{
+#     # run lm (linear)
+#     test<-lm(as.numeric(allpoly[,pheno])~as.numeric(as.factor(allpoly[,snp])), data = allpoly)
+#     test2<-lm(as.numeric(allpoly[,pheno])~as.numeric(as.factor(allpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX), data = allpoly)
+#     test3<-lm(as.numeric(allpoly[,pheno])~as.numeric(as.factor(allpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX), data = allpoly)
+#     
+#   }
+#   
+#   # save 'test' results
+#   resultmatrix[row,5] <-length(test$fitted.values)
+#   resultmatrix[row,6:8]<- round(broom::tidy(test)[2,2:4], digits = 3)
+#   resultmatrix[row,9]<- broom::tidy(test)[2,5]
+#   
+#   # save 'test2' results
+#   resultmatrix[row,10] <-length(test2$fitted.values)
+#   resultmatrix[row,11:13]<- round(broom::tidy(test2)[2,2:4], digits = 3)
+#   resultmatrix[row,14]<- broom::tidy(test2)[2,5]
+#   
+#   # save 'test3' results
+#   resultmatrix[row,15] <-length(test3$fitted.values)
+#   resultmatrix[row,16:18]<- round(broom::tidy(test3)[2,2:4], digits = 3)
+#   resultmatrix[row,19]<- broom::tidy(test3)[2,5]
+#   
+#   row <-  row + 1
+#   rm(test, test2, test3)
+# }
+# 
+# 
+# # convert log(OR) to actual OR for binomial tests
+# resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")] <- round(exp(resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")]), digits = 3)
+
+
+#editing table format
+#data matrix pipped into mutate function to highlight significant p-values and change their format if very small
+#pipped into kable settings to make pretty 
+
+
+make_snp_results_table(allpoly, phenotypelist) %>% #resultmatrix
+  mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>% 
+  kable(., caption="Associations in entire Polynesian cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", "A1", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+  kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+  add_header_above(c( " "= 5, "unadjusted" = 5,"adjusted (age + sex)"=5, "adjusted (age, sex)"=5)) %>% 
+  column_spec(11:15, background = "lavenderblush") %>% 
+  column_spec(16:20, background = "honeydew")
+
+
+```
+
+```{r, echo=FALSE, message=F, warning=FALSE, escape = FALSE, results='asis'}
+# resultmatrix<-as.data.frame(matrix(nrow=1, ncol=19))
+# colnames(resultmatrix)<-c("SNP", "phenotype", "genotypecount", "genotypes", "n","beta","std.error","statistic","p.value","n.adjusted.1","beta.adjusted.1","std.error.adjusted.1","statistic.adjusted.1","p.value adjusted.1","n.adjusted.2","beta.adjusted.2","std.error.adjusted.2","statistic.adjusted.2","p.value.adjusted.2")
+# row <- 1
+# #performing unadjusted and adjusted linear regression and adding results to table
+# for (snp in snplist){
+#   for (pheno in phenotypelist){
+#     resultmatrix[row,1] <-snp
+#     resultmatrix[row,2] <-pheno
+#     resultmatrix[row,3] <- paste(table(na.omit(eastpoly[!is.na(eastpoly[, pheno]), snp])), collapse = "/")
+#     resultmatrix[row,4] <- paste(levels(as.factor(eastpoly[, snp])), collapse = "/")
+#     
+#     # if else function to make sure we run the right type of regression
+#     if(pheno %in% c("DIABETES","GOUTAFFSTAT")){
+#       # run glm (logistic)
+#     test<-glm(as.numeric(eastpoly[,pheno])~as.numeric(as.factor(eastpoly[,snp])), data = eastpoly, family = "binomial")
+#     test2<-glm(as.numeric(eastpoly[,pheno])~as.numeric(as.factor(eastpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX), data = eastpoly, family = "binomial")
+#     test3<-glm(as.numeric(eastpoly[,pheno])~as.numeric(as.factor(eastpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX)+PCA1+PCA2+PCA3+PCA4, data = eastpoly, family = "binomial")
+#     
+#     } else{
+#       # run lm (linear)
+#     test<-lm(as.numeric(eastpoly[,pheno])~as.numeric(as.factor(eastpoly[,snp])), data = eastpoly)
+#     test2<-lm(as.numeric(eastpoly[,pheno])~as.numeric(as.factor(eastpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX), data = eastpoly)
+#     test3<-lm(as.numeric(eastpoly[,pheno])~as.numeric(as.factor(eastpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX)+PCA1+PCA2+PCA3+PCA4, data = eastpoly)
+# 
+#     }
+#     
+#     # save 'test' results
+#     resultmatrix[row,5] <-length(test$fitted.values)
+#     resultmatrix[row,6:8]<- round(broom::tidy(test)[2,2:4], digits = 3)
+#     resultmatrix[row,9]<- broom::tidy(test)[2,5]
+#     
+#     # save 'test2' results
+#     resultmatrix[row,10] <-length(test2$fitted.values)
+#     resultmatrix[row,11:13]<- round(broom::tidy(test2)[2,2:4], digits = 3)
+#     resultmatrix[row,14]<- broom::tidy(test2)[2,5]
+#     
+#     # save 'test3' results
+#     resultmatrix[row,15] <-length(test3$fitted.values)
+#     resultmatrix[row,16:18]<- round(broom::tidy(test3)[2,2:4], digits = 3)
+#     resultmatrix[row,19]<- broom::tidy(test3)[2,5]
+#     
+# row <-  row + 1
+# rm(test, test2, test3)
+#   }
+# }
+# 
+# # convert log(OR) to actual OR for binomial tests
+# resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")] <- round(exp(resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")]), digits = 3)
+# 
+# 
+# #editing table format
+# #data matrix pipped into mutate function to highlight significant p-values and change their format if very small
+# #pipped into kable settings to make pretty 
+# resultmatrix%>%
+#   mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>% 
+#   kable(., caption="Associations in East Polynesian cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+#   kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+#   add_header_above(c( " "= 4, "unadjusted" = 5,"adjusted (age + sex)"=5, "adjusted (age, sex + PCA's 1-4)"=5)) %>% 
+#   column_spec(10:14, background = "lavenderblush") %>% 
+#   column_spec(15:19, background = "honeydew")
+
+make_snp_results_table(eastpoly, phenotypelist)
+
+make_snp_results_table(eastpoly, phenotypelist) %>% #resultmatrix
+  mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>% 
+  kable(., caption="Associations in East Polynesian cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", "A1", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+  kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+  add_header_above(c( " "= 5, "unadjusted" = 5,"adjusted (age + sex)"=5, "adjusted (age, sex)"=5)) %>% 
+  column_spec(11:15, background = "lavenderblush") %>% 
+  column_spec(16:20, background = "honeydew")
+
+```
+
+
+
+```{r, echo=FALSE, message=F, warning=FALSE, escape = FALSE, results='asis'}
+# resultmatrix<-as.data.frame(matrix(nrow=1, ncol=19))
+# colnames(resultmatrix)<-c("SNP", "phenotype", "genotypecount", "genotypes", "n","beta","std.error","statistic","p.value","n.adjusted.1","beta.adjusted.1","std.error.adjusted.1","statistic.adjusted.1","p.value adjusted.1","n.adjusted.2","beta.adjusted.2","std.error.adjusted.2","statistic.adjusted.2","p.value.adjusted.2")
+# row <- 1
+# #performing unadjusted and adjusted linear regression and adding results to table
+# for (snp in snplist){
+#   for (pheno in phenotypelist){
+#     resultmatrix[row,1] <-snp
+#     resultmatrix[row,2] <-pheno
+#     resultmatrix[row,3] <- paste(table(na.omit(westpoly[!is.na(westpoly[, pheno]), snp])), collapse = "/")
+#     resultmatrix[row,4] <- paste(levels(as.factor(westpoly[, snp])), collapse = "/")
+#     
+#     # if else function to make sure we run the right type of regression
+#     if(pheno %in% c("DIABETES","GOUTAFFSTAT")){
+#       # run glm (logistic)
+#     test<-glm(as.numeric(westpoly[,pheno])~as.numeric(as.factor(westpoly[,snp])), data = westpoly, family = "binomial")
+#     test2<-glm(as.numeric(westpoly[,pheno])~as.numeric(as.factor(westpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX), data = westpoly, family = "binomial")
+#     test3<-glm(as.numeric(westpoly[,pheno])~as.numeric(as.factor(westpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX)+PCA1+PCA2+PCA3+PCA4, data = westpoly, family = "binomial")
+#     
+#     } else{
+#       # run lm (linear)
+#     test<-lm(as.numeric(westpoly[,pheno])~as.numeric(as.factor(westpoly[,snp])), data = westpoly)
+#     test2<-lm(as.numeric(westpoly[,pheno])~as.numeric(as.factor(westpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX), data = westpoly)
+#     test3<-lm(as.numeric(westpoly[,pheno])~as.numeric(as.factor(westpoly[,snp]))+as.numeric(AGECOL)+as.factor(SEX)+PCA1+PCA2+PCA3+PCA4, data = westpoly)
+# 
+#     }
+#     
+#     # save 'test' results
+#     resultmatrix[row,5] <-length(test$fitted.values)
+#     resultmatrix[row,6:8]<- round(broom::tidy(test)[2,2:4], digits = 3)
+#     resultmatrix[row,9]<- broom::tidy(test)[2,5]
+#     
+#     # save 'test2' results
+#     resultmatrix[row,10] <-length(test2$fitted.values)
+#     resultmatrix[row,11:13]<- round(broom::tidy(test2)[2,2:4], digits = 3)
+#     resultmatrix[row,14]<- broom::tidy(test2)[2,5]
+#     
+#     # save 'test3' results
+#     resultmatrix[row,15] <-length(test3$fitted.values)
+#     resultmatrix[row,16:18]<- round(broom::tidy(test3)[2,2:4], digits = 3)
+#     resultmatrix[row,19]<- broom::tidy(test3)[2,5]
+#     
+# row <-  row + 1
+# rm(test, test2, test3)
+#   }
+# }
+# 
+# # convert log(OR) to actual OR for binomial tests
+# resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")] <- round(exp(resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")]), digits = 3)
+# 
+# 
+# #editing table format
+# #data matrix pipped into mutate function to highlight significant p-values and change their format if very small
+# #pipped into kable settings to make pretty 
+# resultmatrix%>%
+#   mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>% 
+#   kable(., caption="Associations in West Polynesian cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+#   kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+#   add_header_above(c( " "= 4, "unadjusted" = 5,"adjusted (age + sex)"=5, "adjusted (age, sex + PCA's 1-4)"=5)) %>% 
+#   column_spec(10:14, background = "lavenderblush") %>% 
+#   column_spec(15:19, background = "honeydew")
+
+make_snp_results_table(westpoly, phenotypelist)
+
+make_snp_results_table(westpoly, phenotypelist) %>% #resultmatrix
+  mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>% 
+  kable(., caption="Associations in West Polynesian cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", "A1", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+  kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+  add_header_above(c( " "= 5, "unadjusted" = 5,"adjusted (age + sex)"=5, "adjusted (age, sex)"=5)) %>% 
+  column_spec(11:15, background = "lavenderblush") %>% 
+  column_spec(16:20, background = "honeydew")
+```
+
+
+```{r, echo=FALSE, message=F, warning=FALSE, escape = FALSE, results='asis'}
+
+resultmatrix<-as.data.frame(matrix(nrow=1, ncol=19))
+colnames(resultmatrix)<-c("SNP", "phenotype", "genotypecount", "genotypes", "n","beta","std.error","statistic","p.value","n.adjusted.1","beta.adjusted.1","std.error.adjusted.1","statistic.adjusted.1","p.value adjusted.1","n.adjusted.2","beta.adjusted.2","std.error.adjusted.2","statistic.adjusted.2","p.value.adjusted.2")
+row <- 1
+# #performing unadjusted and adjusted linear regression and adding results to table
+for (snp in snplist){
+  for (pheno in phenotypelist){
+    resultmatrix[row,1] <-snp
+    resultmatrix[row,2] <-pheno
+    resultmatrix[row,3] <- paste(table(na.omit(allpoly_males[!is.na(allpoly_males[, pheno]), snp])), collapse = "/")
+    resultmatrix[row,4] <- paste(levels(as.factor(allpoly_males[, snp])), collapse = "/")
+
+    # if else function to make sure we run the right type of regression
+    if(pheno %in% c("DIABETES","GOUTAFFSTAT")){
+      # run glm (logistic)
+    test<-glm(as.numeric(allpoly_males[,pheno])~as.numeric(as.factor(allpoly_males[,snp])), data = allpoly_males, family = "binomial")
+    test2<-glm(as.numeric(allpoly_males[,pheno])~as.numeric(as.factor(allpoly_males[,snp]))+as.numeric(AGECOL), data = allpoly_males, family = "binomial")
+    test3<-glm(as.numeric(allpoly_males[,pheno])~as.numeric(as.factor(allpoly_males[,snp]))+as.numeric(AGECOL), data = allpoly_males, family = "binomial")
+
+    } else{
+      # run lm (linear)
+    test<-lm(as.numeric(allpoly_males[,pheno])~as.numeric(as.factor(allpoly_males[,snp])), data = allpoly_males)
+    test2<-lm(as.numeric(allpoly_males[,pheno])~as.numeric(as.factor(allpoly_males[,snp]))+as.numeric(AGECOL), data = allpoly_males)
+    test3<-lm(as.numeric(allpoly_males[,pheno])~as.numeric(as.factor(allpoly_males[,snp]))+as.numeric(AGECOL), data = allpoly_males)
+
+    }
+
+    # save 'test' results
+    resultmatrix[row,5] <-length(test$fitted.values)
+    resultmatrix[row,6:8]<- round(broom::tidy(test)[2,2:4], digits = 3)
+    resultmatrix[row,9]<- broom::tidy(test)[2,5]
+
+    # save 'test2' results
+    resultmatrix[row,10] <-length(test2$fitted.values)
+    resultmatrix[row,11:13]<- round(broom::tidy(test2)[2,2:4], digits = 3)
+    resultmatrix[row,14]<- broom::tidy(test2)[2,5]
+
+    # save 'test3' results
+    resultmatrix[row,15] <-length(test3$fitted.values)
+    resultmatrix[row,16:18]<- round(broom::tidy(test3)[2,2:4], digits = 3)
+    resultmatrix[row,19]<- broom::tidy(test3)[2,5]
+
+row <-  row + 1
+rm(test, test2, test3)
+  }
+}
+
+# convert log(OR) to actual OR for binomial tests
+resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")] <- round(exp(resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")]), digits = 3)
+
+
+#editing table format
+#data matrix pipped into mutate function to highlight significant p-values and change their format if very small
+#pipped into kable settings to make pretty
+resultmatrix%>%
+  mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>%
+  kable(., caption="Associations in all polynesian males cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+  kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+  add_header_above(c( " "= 4, "unadjusted" = 5,"adjusted (age)"=5, "adjusted (age)"=5)) %>%
+  column_spec(10:14, background = "lavenderblush") %>%
+  column_spec(15:19, background = "honeydew")
+
+#make_snp_results_table(eastpoly_females, phenotypelist)
+
+ #make_snp_results_table(eastpoly_females, phenotypelist) %>% #resultmatrix
+   #mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>%
+   #kable(., caption="Associations in East Polynesian females cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", "A1", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+   #kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+   #add_header_above(c( " "= 5, "unadjusted" = 5,"adjusted (age + sex)"=5, "adjusted (age, sex + PCA's 1-4)"=5)) %>%
+   #column_spec(11:15, background = "lavenderblush") %>%
+   #column_spec(16:20, background = "honeydew")
+
+```
+
+```{r, echo=FALSE, message=F, warning=FALSE, escape = FALSE, results='asis'}
+
+resultmatrix<-as.data.frame(matrix(nrow=1, ncol=19))
+colnames(resultmatrix)<-c("SNP", "phenotype", "genotypecount", "genotypes", "n","beta","std.error","statistic","p.value","n.adjusted.1","beta.adjusted.1","std.error.adjusted.1","statistic.adjusted.1","p.value adjusted.1","n.adjusted.2","beta.adjusted.2","std.error.adjusted.2","statistic.adjusted.2","p.value.adjusted.2")
+row <- 1
+#performing unadjusted and adjusted linear regression and adding results to table
+for (snp in snplist){
+  for (pheno in phenotypelist){
+    resultmatrix[row,1] <-snp
+    resultmatrix[row,2] <-pheno
+    resultmatrix[row,3] <- paste(table(na.omit(allpoly_females[!is.na(allpoly_females[, pheno]), snp])), collapse = "/")
+    resultmatrix[row,4] <- paste(levels(as.factor(allpoly_females[, snp])), collapse = "/")
+    
+    # if else function to make sure we run the right type of regression
+    if(pheno %in% c("DIABETES","GOUTAFFSTAT")){
+      # run glm (logistic)
+    test<-glm(as.numeric(allpoly_females[,pheno])~as.numeric(as.factor(allpoly_females[,snp])), data = allpoly_females, family = "binomial")
+    test2<-glm(as.numeric(allpoly_females[,pheno])~as.numeric(as.factor(allpoly_females[,snp]))+as.numeric(AGECOL), data = allpoly_females, family = "binomial")
+    test3<-glm(as.numeric(allpoly_females[,pheno])~as.numeric(as.factor(allpoly_females[,snp]))+as.numeric(AGECOL), data = allpoly_females, family = "binomial")
+    
+    } else{
+      # run lm (linear)
+    test<-lm(as.numeric(allpoly_females[,pheno])~as.numeric(as.factor(allpoly_females[,snp])), data = allpoly_females)
+    test2<-lm(as.numeric(allpoly_females[,pheno])~as.numeric(as.factor(allpoly_females[,snp]))+as.numeric(AGECOL), data = allpoly_females)
+    test3<-lm(as.numeric(allpoly_females[,pheno])~as.numeric(as.factor(allpoly_females[,snp]))+as.numeric(AGECOL), data = allpoly_females)
+
+    }
+    
+    # save 'test' results
+    resultmatrix[row,5] <-length(test$fitted.values)
+    resultmatrix[row,6:8]<- round(broom::tidy(test)[2,2:4], digits = 3)
+    resultmatrix[row,9]<- broom::tidy(test)[2,5]
+    
+    # save 'test2' results
+    resultmatrix[row,10] <-length(test2$fitted.values)
+    resultmatrix[row,11:13]<- round(broom::tidy(test2)[2,2:4], digits = 3)
+    resultmatrix[row,14]<- broom::tidy(test2)[2,5]
+    
+    # save 'test3' results
+    resultmatrix[row,15] <-length(test3$fitted.values)
+    resultmatrix[row,16:18]<- round(broom::tidy(test3)[2,2:4], digits = 3)
+    resultmatrix[row,19]<- broom::tidy(test3)[2,5]
+    
+row <-  row + 1
+rm(test, test2, test3)
+  }
+}
+
+# convert log(OR) to actual OR for binomial tests
+resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")] <- round(exp(resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")]), digits = 3)
+
+
+#editing table format
+#data matrix pipped into mutate function to highlight significant p-values and change their format if very small
+#pipped into kable settings to make pretty 
+resultmatrix%>%
+  mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>% 
+  kable(., caption="Associations in all polynesian females cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+  kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+  add_header_above(c( " "= 4, "unadjusted" = 5,"adjusted (age)"=5, "adjusted (age)"=5)) %>% 
+  column_spec(10:14, background = "lavenderblush") %>% 
+  column_spec(15:19, background = "honeydew")
+
+```
+
+```{r, echo=FALSE, message=F, warning=FALSE, escape = FALSE, results='asis'}
+
+# resultmatrix<-as.data.frame(matrix(nrow=1, ncol=19))
+# colnames(resultmatrix)<-c("SNP", "phenotype", "genotypecount", "genotypes", "n","beta","std.error","statistic","p.value","n.adjusted.1","beta.adjusted.1","std.error.adjusted.1","statistic.adjusted.1","p.value adjusted.1","n.adjusted.2","beta.adjusted.2","std.error.adjusted.2","statistic.adjusted.2","p.value.adjusted.2")
+# row <- 1
+# #performing unadjusted and adjusted linear regression and adding results to table
+# for (snp in snplist){
+#   for (pheno in phenotypelist){
+#     resultmatrix[row,1] <-snp
+#     resultmatrix[row,2] <-pheno
+#     resultmatrix[row,3] <- paste(table(na.omit(westpoly_females[!is.na(westpoly_females[, pheno]), snp])), collapse = "/")
+#     resultmatrix[row,4] <- paste(levels(as.factor(westpoly_females[, snp])), collapse = "/")
+#     
+#     # if else function to make sure we run the right type of regression
+#     if(pheno %in% c("DIABETES","GOUTAFFSTAT")){
+#       # run glm (logistic)
+#     test<-glm(as.numeric(westpoly_females[,pheno])~as.numeric(as.factor(westpoly_females[,snp])), data = westpoly_females, family = "binomial")
+#     test2<-glm(as.numeric(westpoly_females[,pheno])~as.numeric(as.factor(westpoly_females[,snp]))+as.numeric(AGECOL), data = westpoly_females, family = "binomial")
+#     test3<-glm(as.numeric(westpoly_females[,pheno])~as.numeric(as.factor(westpoly_females[,snp]))+as.numeric(AGECOL), data = westpoly_females, family = "binomial")
+#     
+#     } else{
+#       # run lm (linear)
+#     test<-lm(as.numeric(westpoly_females[,pheno])~as.numeric(as.factor(westpoly_females[,snp])), data = westpoly_females)
+#     test2<-lm(as.numeric(westpoly_females[,pheno])~as.numeric(as.factor(westpoly_females[,snp]))+as.numeric(AGECOL), data = westpoly_females)
+#     test3<-lm(as.numeric(westpoly_females[,pheno])~as.numeric(as.factor(westpoly_females[,snp]))+as.numeric(AGECOL), data = westpoly_females)
+# 
+#     }
+#     
+#     # save 'test' results
+#     resultmatrix[row,5] <-length(test$fitted.values)
+#     resultmatrix[row,6:8]<- round(broom::tidy(test)[2,2:4], digits = 3)
+#     resultmatrix[row,9]<- broom::tidy(test)[2,5]
+#     
+#     # save 'test2' results
+#     resultmatrix[row,10] <-length(test2$fitted.values)
+#     resultmatrix[row,11:13]<- round(broom::tidy(test2)[2,2:4], digits = 3)
+#     resultmatrix[row,14]<- broom::tidy(test2)[2,5]
+#     
+#     # save 'test3' results
+#     resultmatrix[row,15] <-length(test3$fitted.values)
+#     resultmatrix[row,16:18]<- round(broom::tidy(test3)[2,2:4], digits = 3)
+#     resultmatrix[row,19]<- broom::tidy(test3)[2,5]
+#     
+# row <-  row + 1
+# rm(test, test2, test3)
+#   }
+# }
+# 
+# # convert log(OR) to actual OR for binomial tests
+# resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")] <- round(exp(resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")]), digits = 3)
+# 
+# 
+# #editing table format
+# #data matrix pipped into mutate function to highlight significant p-values and change their format if very small
+# #pipped into kable settings to make pretty 
+# resultmatrix%>%
+#   mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>% 
+#   kable(., caption="Associations in west polynesian females cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+#   kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+#   add_header_above(c( " "= 4, "unadjusted" = 5,"adjusted (age)"=5, "adjusted (age)"=5)) %>% 
+#   column_spec(10:14, background = "lavenderblush") %>% 
+#   column_spec(15:19, background = "honeydew")
+
+```
+
+```{r, echo=FALSE, message=F, warning=FALSE, escape = FALSE, results='asis'}
+
+# resultmatrix<-as.data.frame(matrix(nrow=1, ncol=19))
+# colnames(resultmatrix)<-c("SNP", "phenotype", "genotypecount", "genotypes", "n","beta","std.error","statistic","p.value","n.adjusted.1","beta.adjusted.1","std.error.adjusted.1","statistic.adjusted.1","p.value adjusted.1","n.adjusted.2","beta.adjusted.2","std.error.adjusted.2","statistic.adjusted.2","p.value.adjusted.2")
+# row <- 1
+# #performing unadjusted and adjusted linear regression and adding results to table
+# for (snp in snplist){
+#   for (pheno in phenotypelist){
+#     resultmatrix[row,1] <-snp
+#     resultmatrix[row,2] <-pheno
+#     resultmatrix[row,3] <- paste(table(na.omit(eastpoly_females[!is.na(eastpoly_females[, pheno]), snp])), collapse = "/")
+#     resultmatrix[row,4] <- paste(levels(as.factor(eastpoly_females[, snp])), collapse = "/")
+#     
+#     # if else function to make sure we run the right type of regression
+#     if(pheno %in% c("DIABETES","GOUTAFFSTAT")){
+#       # run glm (logistic)
+#     test<-glm(as.numeric(eastpoly_females[,pheno])~as.numeric(as.factor(eastpoly_females[,snp])), data = eastpoly_females, family = "binomial")
+#     test2<-glm(as.numeric(eastpoly_females[,pheno])~as.numeric(as.factor(eastpoly_females[,snp]))+as.numeric(AGECOL), data = eastpoly_females, family = "binomial")
+#     test3<-glm(as.numeric(eastpoly_females[,pheno])~as.numeric(as.factor(eastpoly_females[,snp]))+as.numeric(AGECOL), data = eastpoly_females, family = "binomial")
+#     
+#     } else{
+#       # run lm (linear)
+#     test<-lm(as.numeric(eastpoly_females[,pheno])~as.numeric(as.factor(eastpoly_females[,snp])), data = eastpoly_females)
+#     test2<-lm(as.numeric(eastpoly_females[,pheno])~as.numeric(as.factor(eastpoly_females[,snp]))+as.numeric(AGECOL), data = eastpoly_females)
+#     test3<-lm(as.numeric(eastpoly_females[,pheno])~as.numeric(as.factor(eastpoly_females[,snp]))+as.numeric(AGECOL), data = eastpoly_females)
+# 
+#     }
+#     
+#     # save 'test' results
+#     resultmatrix[row,5] <-length(test$fitted.values)
+#     resultmatrix[row,6:8]<- round(broom::tidy(test)[2,2:4], digits = 3)
+#     resultmatrix[row,9]<- broom::tidy(test)[2,5]
+#     
+#     # save 'test2' results
+#     resultmatrix[row,10] <-length(test2$fitted.values)
+#     resultmatrix[row,11:13]<- round(broom::tidy(test2)[2,2:4], digits = 3)
+#     resultmatrix[row,14]<- broom::tidy(test2)[2,5]
+#     
+#     # save 'test3' results
+#     resultmatrix[row,15] <-length(test3$fitted.values)
+#     resultmatrix[row,16:18]<- round(broom::tidy(test3)[2,2:4], digits = 3)
+#     resultmatrix[row,19]<- broom::tidy(test3)[2,5]
+#     
+# row <-  row + 1
+# rm(test, test2, test3)
+#   }
+# }
+# 
+# # convert log(OR) to actual OR for binomial tests
+# 
+# resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")] <- round(exp(resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")]), digits = 3)
+# 
+# #editing table format
+# #data matrix pipped into mutate function to highlight significant p-values and change their format if very small
+# #pipped into kable settings to make pretty 
+# resultmatrix%>%
+#   mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>% 
+#   kable(., caption="Associations in east polynesian females cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+#   kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+#   add_header_above(c( " "= 4, "unadjusted" = 5,"adjusted (age)"=5, "adjusted (age)"=5)) %>% 
+#   column_spec(10:14, background = "lavenderblush") %>% 
+#   column_spec(15:19, background = "honeydew")
+
+```
+
+
+```{r, echo=FALSE, message=F, warning=FALSE, escape = FALSE, results='asis'}
+
+# resultmatrix<-as.data.frame(matrix(nrow=1, ncol=19))
+# colnames(resultmatrix)<-c("SNP", "phenotype", "genotypecount", "genotypes", "n","beta","std.error","statistic","p.value","n.adjusted.1","beta.adjusted.1","std.error.adjusted.1","statistic.adjusted.1","p.value adjusted.1","n.adjusted.2","beta.adjusted.2","std.error.adjusted.2","statistic.adjusted.2","p.value.adjusted.2")
+# row <- 1
+# #performing unadjusted and adjusted linear regression and adding results to table
+# for (snp in snplist){
+#   for (pheno in phenotypelist){
+#     resultmatrix[row,1] <-snp
+#     resultmatrix[row,2] <-pheno
+#     resultmatrix[row,3] <- paste(table(na.omit(westpoly_males[!is.na(westpoly_males[, pheno]), snp])), collapse = "/")
+#     resultmatrix[row,4] <- paste(levels(as.factor(westpoly_males[, snp])), collapse = "/")
+#     
+#     # if else function to make sure we run the right type of regression
+#     if(pheno %in% c("DIABETES","GOUTAFFSTAT")){
+#       # run glm (logistic)
+#     test<-glm(as.numeric(westpoly_males[,pheno])~as.numeric(as.factor(westpoly_males[,snp])), data = westpoly_males, family = "binomial")
+#     test2<-glm(as.numeric(westpoly_males[,pheno])~as.numeric(as.factor(westpoly_males[,snp]))+as.numeric(AGECOL), data = westpoly_males, family = "binomial")
+#     test3<-glm(as.numeric(westpoly_males[,pheno])~as.numeric(as.factor(westpoly_males[,snp]))+as.numeric(AGECOL)+PCA1+PCA2+PCA3+PCA4, data = westpoly_males, family = "binomial")
+#     
+#     } else{
+#       # run lm (linear)
+#     test<-lm(as.numeric(westpoly_males[,pheno])~as.numeric(as.factor(westpoly_males[,snp])), data = westpoly_males)
+#     test2<-lm(as.numeric(westpoly_males[,pheno])~as.numeric(as.factor(westpoly_males[,snp]))+as.numeric(AGECOL), data = westpoly_males)
+#     test3<-lm(as.numeric(westpoly_males[,pheno])~as.numeric(as.factor(westpoly_males[,snp]))+as.numeric(AGECOL)+PCA1+PCA2+PCA3+PCA4, data = westpoly_males)
+# 
+#     }
+#     
+#     # save 'test' results
+#     resultmatrix[row,5] <-length(test$fitted.values)
+#     resultmatrix[row,6:8]<- round(broom::tidy(test)[2,2:4], digits = 3)
+#     resultmatrix[row,9]<- broom::tidy(test)[2,5]
+#     
+#     # save 'test2' results
+#     resultmatrix[row,10] <-length(test2$fitted.values)
+#     resultmatrix[row,11:13]<- round(broom::tidy(test2)[2,2:4], digits = 3)
+#     resultmatrix[row,14]<- broom::tidy(test2)[2,5]
+#     
+#     # save 'test3' results
+#     resultmatrix[row,15] <-length(test3$fitted.values)
+#     resultmatrix[row,16:18]<- round(broom::tidy(test3)[2,2:4], digits = 3)
+#     resultmatrix[row,19]<- broom::tidy(test3)[2,5]
+#     
+# row <-  row + 1
+# rm(test, test2, test3)
+#   }
+# }
+# 
+# # convert log(OR) to actual OR for binomial tests
+# resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")] <- round(exp(resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")]), digits = 3)
+# 
+# 
+# #editing table format
+# #data matrix pipped into mutate function to highlight significant p-values and change their format if very small
+# #pipped into kable settings to make pretty 
+# resultmatrix%>%
+#   mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>% 
+#   kable(., caption="Associations in west polynesian males cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+#   kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+#   add_header_above(c( " "= 4, "unadjusted" = 5,"adjusted (age)"=5, "adjusted (age, + PCA's 1-4)"=5)) %>% 
+#   column_spec(10:14, background = "lavenderblush") %>% 
+#   column_spec(15:19, background = "honeydew")
+# 
+# ```
+# 
+# ```{r, echo=FALSE, message=F, warning=FALSE, escape = FALSE, results='asis'}
+# 
+# resultmatrix<-as.data.frame(matrix(nrow=1, ncol=19))
+# colnames(resultmatrix)<-c("SNP", "phenotype", "genotypecount", "genotypes", "n","beta","std.error","statistic","p.value","n.adjusted.1","beta.adjusted.1","std.error.adjusted.1","statistic.adjusted.1","p.value adjusted.1","n.adjusted.2","beta.adjusted.2","std.error.adjusted.2","statistic.adjusted.2","p.value.adjusted.2")
+# row <- 1
+# #performing unadjusted and adjusted linear regression and adding results to table
+# for (snp in snplist){
+#   for (pheno in phenotypelist){
+#     resultmatrix[row,1] <-snp
+#     resultmatrix[row,2] <-pheno
+#     resultmatrix[row,3] <- paste(table(na.omit(eastpoly_males[!is.na(eastpoly_males[, pheno]), snp])), collapse = "/")
+#     resultmatrix[row,4] <- paste(levels(as.factor(eastpoly_males[, snp])), collapse = "/")
+#     
+#     # if else function to make sure we run the right type of regression
+#     if(pheno %in% c("DIABETES","GOUTAFFSTAT")){
+#       # run glm (logistic)
+#     test<-glm(as.numeric(eastpoly_males[,pheno])~as.numeric(as.factor(eastpoly_males[,snp])), data = eastpoly_males, family = "binomial")
+#     test2<-glm(as.numeric(eastpoly_males[,pheno])~as.numeric(as.factor(eastpoly_males[,snp]))+as.numeric(AGECOL), data = eastpoly_males, family = "binomial")
+#     test3<-glm(as.numeric(eastpoly_males[,pheno])~as.numeric(as.factor(eastpoly_males[,snp]))+as.numeric(AGECOL)+PCA1+PCA2+PCA3+PCA4, data = eastpoly_males, family = "binomial")
+#     
+#     } else{
+#       # run lm (linear)
+#     test<-lm(as.numeric(eastpoly_males[,pheno])~as.numeric(as.factor(eastpoly_males[,snp])), data = eastpoly_males)
+#     test2<-lm(as.numeric(eastpoly_males[,pheno])~as.numeric(as.factor(eastpoly_males[,snp]))+as.numeric(AGECOL), data = eastpoly_males)
+#     test3<-lm(as.numeric(eastpoly_males[,pheno])~as.numeric(as.factor(eastpoly_males[,snp]))+as.numeric(AGECOL)+PCA1+PCA2+PCA3+PCA4, data = eastpoly_males)
+# 
+#     }
+#     
+#     # save 'test' results
+#     resultmatrix[row,5] <-length(test$fitted.values)
+#     resultmatrix[row,6:8]<- round(broom::tidy(test)[2,2:4], digits = 3)
+#     resultmatrix[row,9]<- broom::tidy(test)[2,5]
+#     
+#     # save 'test2' results
+#     resultmatrix[row,10] <-length(test2$fitted.values)
+#     resultmatrix[row,11:13]<- round(broom::tidy(test2)[2,2:4], digits = 3)
+#     resultmatrix[row,14]<- broom::tidy(test2)[2,5]
+#     
+#     # save 'test3' results
+#     resultmatrix[row,15] <-length(test3$fitted.values)
+#     resultmatrix[row,16:18]<- round(broom::tidy(test3)[2,2:4], digits = 3)
+#     resultmatrix[row,19]<- broom::tidy(test3)[2,5]
+#     
+# row <-  row + 1
+# rm(test, test2, test3)
+#   }
+# }
+# 
+# # convert log(OR) to actual OR for binomial tests
+# resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")] <- round(exp(resultmatrix[resultmatrix$phenotype %in% c("DIABETES","GOUTAFFSTAT"), c("beta","beta.adjusted.1","beta.adjusted.2")]), digits = 3)
+# 
+
+#editing table format
+#data matrix pipped into mutate function to highlight significant p-values and change their format if very small
+#pipped into kable settings to make pretty 
+# resultmatrix%>%
+#   mutate_at(vars(starts_with("p.value")), funs(purrr::map_chr(., ~ifelse(.x < 0.05, format_p_ke(.x, bold = TRUE, format = 'html'), format_p_ke(.x, bold = FALSE, format = 'html')) )) ) %>% 
+#   kable(., caption="Associations in east polynesian males cohort", format = "html", escape = F, col.names = c("SNP", "phenotype", "genotypes (n)", "genotypes", rep(c('n',"beta/OR", "SE","t-stat","p"), 3))) %>%
+#   kable_styling(bootstrap_options = c("hover"), full_width = T)%>%
+#   add_header_above(c( " "= 4, "unadjusted" = 5,"adjusted (age)"=5, "adjusted (age, + PCA's 1-4)"=5)) %>% 
+#   column_spec(10:14, background = "lavenderblush") %>% 
+#   column_spec(15:19, background = "honeydew")
+
+```
