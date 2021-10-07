@@ -1,0 +1,287 @@
+
+
+# the most import step, natural log your OR using the funtion below and then put this into the logOR bit in the next column, analagous to where you put the effect for the measured traits
+#log(1.579)
+
+#SEQUENOM
+#Male 'East Polynesian' 
+log(2.04)
+#Female 'East Polynesian' 
+log(1.76)
+#Male 'West Polynesian' 
+log(1.15)
+#Female 'West Polynesian' 
+log(1.65)
+
+#NPH
+#male NPH
+log(2.01)
+#female NPH
+log(2.22)
+
+
+
+# t2d <- read.table(text = "Group Study logOR Error
+# 'Practice' 'Sequenom' 0.4567917 0.115
+# 'Practice' 'NPH' 0.4567917 0.115", header = TRUE, stringsAsFactors = FALSE)
+
+#SEQUENOM
+SEQUENOM <- read.table(text = "Study Group logOR Error
+Male 'East Polynesian' 0.7129498 0.244
+Female 'East Polynesian' 0.5653138 0.247
+Male 'West Polynesian' 0.1397619 0.269
+Female 'West Polynesian' 0.50077537 0.465", header = TRUE, stringsAsFactors = FALSE)
+
+#JAZF1(NO NPH)+SEQUENOM
+NPH <- read.table(text = "Study Group logOR Error
+Male 'NPH' 0.6981347 0.297
+Female 'NPH' 0.7975072 0.459", header = TRUE, stringsAsFactors = FALSE)
+
+#SEQUENOM
+SEQUENOM_NPH <- read.table(text = "Study Group logOR Error
+Male 'East Polynesian' 0.7129498 0.244
+Female 'East Polynesian' 0.5653138 0.247
+Male 'West Polynesian' 0.1397619 0.269
+Female 'West Polynesian' 0.50077537 0.465
+Male 'NPH' 0.6981347 0.297
+Female 'NPH' 0.7975072 0.459", header = TRUE, stringsAsFactors = FALSE)
+
+# Perform meta analyses
+#library(meta)
+
+# meta using OR
+# t2d_meta <- metagen(TE = logOR, # beta has been changed to logOR here to match input
+#                     seTE = Error, # standard error
+#                     studlab = Study, # study labels
+#                     byvar = Group, # groupings to do sub-metas on
+#                     sm = "OR", # specify summary measure here (default assumes beta, change to OR here to get output on a log scale)
+#                     data = t2d # file of input data
+#                     )
+
+library(meta)
+SEQUENOM_meta <- metagen(TE = logOR, # treatment effect (beta or log OR)
+                               seTE = Error, # standard error
+                               studlab = Study, # study labels 
+                               byvar = Group, # groupings to do sub-metas on (can't have any as NA so made other a blank text cell) 
+                               sm = "OR",
+                               data = SEQUENOM # file of input data
+)
+NPH_meta <- metagen(TE = logOR, seTE = Error, studlab = Study, byvar = Group, sm = "OR",data = NPH)
+
+SEQUENOM_NPH_meta <- metagen(TE = logOR, seTE = Error, studlab = Study, byvar = Group, sm = "OR",data = SEQUENOM_NPH)
+
+
+
+# have to round study p-values before making plot (no way to round within plot function)
+## to convert all p-values to scientific style (1e-10):
+# BMI_meta$pval <- sprintf(fmt = "%.2e", BMI_meta$pval)
+## to convert just one p-value to scientific 
+# BMI_meta$pval[1] <- sprintf(fmt = "%.2e", BMI_meta$pval[1])
+# BMI_meta$pval[2:7] <- sprintf(fmt = "%.3f", as.numeric(BMI_meta$pval[2:7]))
+## [% means numbers before the decimal don't change, 3f means 3 decimal figures; for scientific format 2e means 2 decimal figures before adding the e]
+
+
+
+#here you just have to change the columns numbers i.e. 1:2 to reflect how many you actually have up above
+#t2d_meta$pval[1:2] <- sprintf(fmt = "%.2e", t2d_meta$pval[1:2])
+
+SEQUENOM_meta$pval[1:4] <- sprintf(fmt = "%.2e", SEQUENOM_meta$pval [1:4])
+NPH_meta$pval [1:2] <- sprintf(fmt = "%.2e", NPH_meta$pval [1:2])
+SEQUENOM_NPH_meta$pval [1:6] <- sprintf(fmt = "%.2e", SEQUENOM_NPH_meta$pval [1:6])
+
+
+
+# # Make tidier forest plots & save
+# 
+# # saves next forest plot
+# png(filename = "t2d_meta.png", width = 8, height = 6, units = "in", res = 300)
+# # make customised forest plot t2d
+# forest(t2d_meta, 
+#        leftcols = c("studlab", "effect", "ci", "pval"), # specify what columns to plot at left of graph
+#        leftlabs = c("Cohort", "OR", "[95% CI]", "P"), # specify column labels (for above)
+#        rightcols = FALSE, # don't plot any columns on right of graph
+#        
+#        comb.random = FALSE, # don't plot random effect
+#        text.fixed = "Overall Effect", # label for overall effect
+#        test.overall.fixed = TRUE, # print p value of overall effect
+#        
+#        xlab = "Type 2 Diabetes (OR)", # label for x-axis
+#        xlim = c(1/8, 8), # x-axis limits (to make it even pick your upper limit then make your lower limit 1/upper_limit)
+#        smlab = "", # remove 'odds ratio' header from above plot
+#        
+#        print.Q = TRUE, # print heterogeneity Q value
+#        print.pval.Q = TRUE, # print heterogeneity Q p value
+#        print.tau2 = FALSE, # don't print tau^2 value
+#        print.I2 = FALSE, # don't print I^2 value
+#        
+#        digits = 3, # beta value digits
+#        digits.se = 3, # standard error digits
+#        digits.pval.Q = 1, # heterogeneity p digits
+#        digits.pval = 1, # overall effect p digits
+#        scientific.pval = TRUE, # make heterogeneity and overall p-values scientific notation
+#        
+#        col.square = "red", # colour of cohort effects
+#        col.diamond = "cornflowerblue", # colour of overall effect
+#        
+#        print.byvar = FALSE # removes "Group = " from header of subgroups
+# )
+# dev.off()
+
+# Make tidier forest plots & save
+
+# saves first forest plot
+png(filename = "FINAL_SEQUENOM_meta.png", width = 8, height = 6, units = "in", res = 300)
+# make customised forest plot log_BMI
+forest(SEQUENOM_meta, 
+       leftcols = c("studlab", "effect", "ci", "pval"), # specify what columns to plot at left of graph
+       leftlabs = c("Cohort", "OR", "[95% CI]", "P"), # specify column labels (for above)
+       rightcols = FALSE, # don't plot any columns on right of graph
+       
+       comb.random = FALSE, # don't plot random effect
+       text.fixed = "Overall Effect", # label for overall effect
+       test.overall.fixed = TRUE, # print p value of overall effect
+       
+       xlab = "Type 2 Diabetes (OR)", # label for x-axis
+       xlim = c(1/8, 8), # x-axis limits (to make it even pick your upper limit then make your lower limit 1/upper_limit)
+       smlab = "", # remove 'odds ratio' header from above plot
+       
+       print.Q = TRUE, # print heterogeneity Q value
+       print.pval.Q = TRUE, # print heterogeneity Q p value
+       print.tau2 = FALSE, # don't print tau^2 value
+       print.I2 = FALSE, # don't print I^2 value
+       
+       digits = 3, # beta value digits
+       digits.se = 3, # standard error digits
+       digits.pval.Q = 1, # heterogeneity p digits
+       digits.pval = 1, # overall effect p digits
+       scientific.pval = TRUE, # make heterogeneity and overall p-values scientific notation
+       
+       col.square = "red", # colour of cohort effects
+       col.diamond = "cornflowerblue", # colour of overall effect
+       
+       print.byvar = FALSE # removes "Group = " from header of subgroups
+)
+dev.off() # saves plot into .png file
+
+# saves next forest plot
+png(filename = "FINAL_NPH_meta.png", width = 8, height = 6, units = "in", res = 300)
+# make customised forest plot untrans_BMI
+forest(NPH_meta, 
+       leftcols = c("studlab", "effect", "ci", "pval"), # specify what columns to plot at left of graph
+       leftlabs = c("Cohort", "OR", "[95% CI]", "P"), # specify column labels (for above)
+       rightcols = FALSE, # don't plot any columns on right of graph
+       
+       comb.random = FALSE, # don't plot random effect
+       text.fixed = "Overall Effect", # label for overall effect
+       test.overall.fixed = TRUE, # print p value of overall effect
+       
+       xlab = "Type 2 Diabetes (OR)", # label for x-axis
+       xlim = c(1/8, 8), # x-axis limits (to make it even pick your upper limit then make your lower limit 1/upper_limit)
+       smlab = "", # remove 'odds ratio' header from above plot
+       
+       print.Q = TRUE, # print heterogeneity Q value
+       print.pval.Q = TRUE, # print heterogeneity Q p value
+       print.tau2 = FALSE, # don't print tau^2 value
+       print.I2 = FALSE, # don't print I^2 value
+       
+       digits = 3, # beta value digits
+       digits.se = 3, # standard error digits
+       digits.pval.Q = 1, # heterogeneity p digits
+       digits.pval = 1, # overall effect p digits
+       scientific.pval = TRUE, # make heterogeneity and overall p-values scientific notation
+       
+       col.square = "red", # colour of cohort effects
+       col.diamond = "cornflowerblue", # colour of overall effect
+       
+       print.byvar = FALSE # removes "Group = " from header of subgroups
+)
+dev.off() # saves plot into .png file
+
+# saves third forest plot
+png(filename = "FINAL_SEQUENOM_NPH_meta.png", width = 8, height = 6, units = "in", res = 300)
+# make customised forest plot waist_circ
+forest(SEQUENOM_NPH_meta, 
+       leftcols = c("studlab", "effect", "ci", "pval"), # specify what columns to plot at left of graph
+       leftlabs = c("Cohort", "OR", "[95% CI]", "P"), # specify column labels (for above)
+       rightcols = FALSE, # don't plot any columns on right of graph
+       
+       comb.random = FALSE, # don't plot random effect
+       text.fixed = "Overall Effect", # label for overall effect
+       test.overall.fixed = TRUE, # print p value of overall effect
+       
+       xlab = "Type 2 Diabetes (OR)", # label for x-axis
+       xlim = c(1/8, 8), # x-axis limits (to make it even pick your upper limit then make your lower limit 1/upper_limit)
+       smlab = "", # remove 'odds ratio' header from above plot
+       
+       print.Q = TRUE, # print heterogeneity Q value
+       print.pval.Q = TRUE, # print heterogeneity Q p value
+       print.tau2 = FALSE, # don't print tau^2 value
+       print.I2 = FALSE, # don't print I^2 value
+       
+       digits = 3, # beta value digits
+       digits.se = 3, # standard error digits
+       digits.pval.Q = 1, # heterogeneity p digits
+       digits.pval = 1, # overall effect p digits
+       scientific.pval = TRUE, # make heterogeneity and overall p-values scientific notation
+       
+       col.square = "red", # colour of cohort effects
+       col.diamond = "cornflowerblue", # colour of overall effect
+       
+       print.byvar = FALSE # removes "Group = " from header of subgroups
+)
+dev.off() # saves plot into .png file
+
+
+
+
+library(png)
+# load in plots saved up above
+SEQUENOM_forest <- readPNG("SEQUENOM_meta.png")
+NPH_SEQUENOM_forest <- readPNG("JAZF1_NO_NPH_SEQUENOM_meta.png")
+JAZF1_SEQUENOM_forest <- readPNG("JAZF1_SEQUENOM_meta.png")
+
+
+png(filename = "SEQUENOM_TOTAL.png",
+    width = 8, # the same width as all three graphs above
+    height = 18, # the height of all three graphs above combined (6 x 3 = 18)
+    units = "in",
+    res = 300)
+par(mar = c(0, 0, 0, 0)) # no margins (plots saved before already have margins)
+# layout says how many plots to put in the file and where to put them, this is 3 plots, one on top of the other
+layout(matrix(data = 1:3, # how many plots you have
+              nrow = 3, # how many rows you want [side-by-side or one on top of other]
+              ncol = 1, # how many columns you want [side-by-side or one on top of other]
+              byrow = TRUE)) # what order to put the plots in (eg if 4 plots in a 2x2 square byrow = TRUE plots 1, 2 on the top line & 3, 4 on the bottom line; byrow = FALSE plots 1, 3 on the top line, 2, 4 on the bottom line)
+
+# add log_BMI_forest to file
+plot(NA, # create an empty plot
+     xlim = c(0, 1), # make the axes go from 0 to 1
+     ylim = c(0, 1), # make the axes go from 0 to 1
+     xaxt = "n", # don't plot the x-axis line
+     yaxt = "n", # don't plot the y-axis line
+     bty = "n", # don't draw a box around the plot
+     xlab = "", # don't label the axes
+     ylab = ""
+)
+rasterImage(image = SEQUENOM_forest, # put the loaded in .png file into the empty graph
+            xleft = 0, # make the .png go from the very start of the x-axis to
+            xright = 1, # the very end of the x-axis
+            ybottom = 0,# make the .png go from the very start of the y-axis to
+            ytop = 1)  # the very end of the y-axis
+points(x = 0.9, # put the figure letter on the right (switch to 0.1 for the left)
+       y = 0.9, # put the figure letter at the top
+       pch = "A", # add the figure letter (for eg Figure2A referencing in paper)
+       cex = 1.5) # the size of the letter
+
+# add JAZF1_NO_NPH_SEQUENOM_forest to file
+plot(NA, xlim = c(0, 1), ylim = c(0, 1), xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
+rasterImage(image = JAZF1_NO_NPH_SEQUENOM_forest, xleft = 0, ybottom = 0, xright = 1, ytop = 1)
+points(x = 0.9, y = 0.9, pch = "B", cex = 1.5)
+
+# add JAZF1_SEQUENOM_forest to file
+plot(NA, xlim = c(0, 1), ylim = c(0, 1), xaxt = "n", yaxt = "n", bty = "n", xlab = "", ylab = "")
+rasterImage(image = JAZF1_SEQUENOM_forest, xleft = 0, ybottom = 0, xright = 1, ytop = 1)
+points(x = 0.9, y = 0.9, pch = "C", cex = 1.5)
+
+# save file
+dev.off()
